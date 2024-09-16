@@ -80,7 +80,7 @@ class NumberDisplayApp:
     def update_number_status(self, number, new_status):
         """番号のステータスを更新"""
         cursor = self.conn.cursor()
-        cursor.execute("UPDATE orders SET status = ? WHERE number = ?", (new_status, number))
+        cursor.execute("UPDATE orders SET status = ? WHERE number = ? AND status != 'served'", (new_status, number))
         self.conn.commit()
 
     def delete_number(self, number):
@@ -138,6 +138,7 @@ class NumberDisplayApp:
         elif self.selected_number is not None:
             if (1 <= self.selected_number <= self.max_number) and (self.selected_number not in self.get_numbers_by_status('cooking')):
                 self.add_number(self.selected_number, 'cooking')
+                self.selected_number = None
                 self.update_display()
             else:
                 print("無効な番号または既に呼び出し中です。")
@@ -151,6 +152,7 @@ class NumberDisplayApp:
         elif self.selected_number is not None:
             if self.selected_number in self.get_numbers_by_status('cooking'):
                 self.update_number_status(self.selected_number, 'providing')
+                self.selected_number = None
                 self.update_display()
             else:
                 print("呼び出し中に存在しない番号です。")
@@ -164,6 +166,7 @@ class NumberDisplayApp:
         elif self.selected_number is not None:
             if self.selected_number in self.get_numbers_by_status('providing'):
                 self.update_number_status(self.selected_number, "served")
+                self.selected_number = None
                 self.update_display()
             else:
                 print("提供可能リストに存在しない番号です。")
