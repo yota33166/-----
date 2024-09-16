@@ -1,6 +1,8 @@
 import customtkinter as ctk
 import tkinter as tk
 import sqlite3
+import play_sound
+import pygame
 
 class NumberDisplayApp:
     def __init__(self, master):
@@ -127,6 +129,7 @@ class NumberDisplayApp:
             target_num = from_numbers[0]  # 最初の番号を取得
             if to_status:
                 self.update_number_status(target_num, to_status)
+                play_sound.play_sound_thread(target_num)
             else:
                 self.update_number_status(target_num, "served")
             self.update_display()
@@ -152,8 +155,10 @@ class NumberDisplayApp:
         elif self.selected_number is not None:
             if self.selected_number in self.get_numbers_by_status('cooking'):
                 self.update_number_status(self.selected_number, 'providing')
+                play_sound.play_sound_thread(self.selected_number)
                 self.selected_number = None
                 self.update_display()
+                
             else:
                 print("呼び出し中に存在しない番号です。")
         else:
@@ -194,3 +199,4 @@ if __name__ == "__main__":
     root = ctk.CTk()  # customTkinterのTkウィンドウ
     app = NumberDisplayApp(root)
     root.mainloop()
+    pygame.mixer.quit()
