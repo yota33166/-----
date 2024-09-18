@@ -4,12 +4,22 @@ import sqlite3
 import play_sound
 import pygame
 
+
 class NumberDisplayApp:
     def __init__(self, master):
         self.master = master
         self.master.title("操作画面")
 
-        self.max_number = 10
+        # ウィンドウのリサイズに応じてウィジェットも拡大する設定
+        self.master.grid_rowconfigure(0, weight=1)  # row=0 の重みを設定
+        self.master.grid_rowconfigure(1, weight=1)  # row=1 の重みを設定
+        self.master.grid_rowconfigure(2, weight=1)  # row=2 の重みを設定
+        self.master.grid_rowconfigure(3, weight=1)  # row=3 の重みを設定
+        self.master.grid_rowconfigure(4, weight=1)  # row=4 の重みを設定
+        self.master.grid_columnconfigure(0, weight=1)  # column=0 の重みを設定
+        self.master.grid_columnconfigure(1, weight=2)  # column=1 の重みを設定
+
+        self.max_number = 5
         self.is_auto = tk.BooleanVar(value=False)
 
         # データベース接続
@@ -17,38 +27,39 @@ class NumberDisplayApp:
         self.create_table()
 
         # 現在選択中番号のラベル
-        self.current_label = ctk.CTkLabel(self.master, text="選択中の番号: ", font=("Arial", 18))
-        self.current_label.grid(row=0, column=0, columnspan=2, pady=10)
+        self.current_label = ctk.CTkLabel(self.master, text="選択中の番号: ", font=("Arial", 48))
+        self.current_label.grid(row=0, column=0, columnspan=2, pady=10, sticky="nsew")
 
         # スクロール可能なフレームを作成し、番号リストを表示する
         self.scrollable_frame = ctk.CTkScrollableFrame(self.master, width=150, height=200)
-        self.scrollable_frame.grid(row=1, column=0, rowspan=4, padx=10, pady=10)
+        self.scrollable_frame.grid(row=1, column=0, rowspan=4, padx=10, pady=10, sticky="nsew")
 
         # 番号を選択するボタンをスクロール可能なフレームに作成
         self.number_buttons = []
         for i in range(1, self.max_number + 1):
             button = ctk.CTkButton(self.scrollable_frame, text=str(i), font=("Arial", 18), command=lambda num=i: self.select_number(num))
-            button.pack(pady=5)
+            button.pack(pady=5, fill='both', expand=True)
             self.number_buttons.append(button)
 
         # マウスホイールのスクロール速度をカスタマイズ
         self.scrollable_frame.bind("<MouseWheel>", self.on_mouse_wheel)
 
+        self.default_font = ("Arial", 28)
         # autoボタン
         self.auto_button = ctk.CTkSwitch(self.master, variable=self.is_auto, text="オートモード")
-        self.auto_button.grid(row=1, column=1, padx=10, pady=10)
+        self.auto_button.grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
 
         # 調理中ボタン
-        self.cooking_button = ctk.CTkButton(self.master, text="調理中にする", font=("Arial", 18), command=self.cooking_number)
-        self.cooking_button.grid(row=2, column=1, padx=10, pady=10)
+        self.cooking_button = ctk.CTkButton(self.master, text="調理中にする", font=self.default_font, command=self.cooking_number)
+        self.cooking_button.grid(row=2, column=1, padx=10, pady=10, sticky="nsew")
 
         # 提供可能にするためのボタン
-        self.provide_button = ctk.CTkButton(self.master, text="提供可能にする", font=("Arial", 18), command=self.provide_number)
-        self.provide_button.grid(row=3, column=1, padx=10, pady=10)
+        self.provide_button = ctk.CTkButton(self.master, text="提供可能にする", font=self.default_font, command=self.provide_number)
+        self.provide_button.grid(row=3, column=1, padx=10, pady=10, sticky="nsew")
 
         # 提供完了した番号を削除するためのボタン
-        self.complete_button = ctk.CTkButton(self.master, text="提供完了にする", font=("Arial", 18), command=self.complete_provide)
-        self.complete_button.grid(row=4, column=1, padx=10, pady=10)
+        self.complete_button = ctk.CTkButton(self.master, text="提供完了にする", font=self.default_font, command=self.complete_provide)
+        self.complete_button.grid(row=4, column=1, padx=10, pady=10, sticky="nsew")
 
         # 表示モニターのウィンドウ (別ウィンドウ)
         self.display_window = ctk.CTkToplevel(self.master)
@@ -62,15 +73,18 @@ class NumberDisplayApp:
         self.provide_label.pack(pady=20)
 
         self.selected_number = None  # 現在選択中の番号を保存
+        self.used_numbers = [] #一度使った番号を保存（番号が最大値まで使われたら再び使用可能にする）
         self.update_display()
 
     def create_table(self):
         """データベーステーブルを作成"""
         cursor = self.conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
-                          id INTEGER PRIMARY KEY,
-                          number INTEGER NOT NULL,
-                          status TEXT NOT NULL)''')
+                            id INTEGER PRIMARY KEY,
+                            number INTEGER NOT NULL,
+                            status TEXT NOT NULL,
+                            accepted_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours'))
+                        )''')
         self.conn.commit()
 
     def add_number(self, number, status):
@@ -110,11 +124,16 @@ class NumberDisplayApp:
         available_numbers = set(range(1, self.max_number + 1))
         
         # 使用中の番号を集合から除外
-        unused_numbers = available_numbers - set(using_numbers)
+        unused_numbers = available_numbers - set(using_numbers) - set(self.used_numbers)
         
         if unused_numbers:
             # 未使用の番号の中で最小の番号を取得
             next_number = min(unused_numbers)
+            # 一度使った番号を保存（番号が最大値まで使われたら再び使用可能にする）
+            self.used_numbers.append(next_number)
+            if max(self.used_numbers) >= self.max_number:
+                self.used_numbers = []
+
             # 次の番号を 'cooking' ステータスで追加
             self.add_number(next_number, 'cooking')
             self.update_display()
@@ -182,7 +201,7 @@ class NumberDisplayApp:
         """呼び出し中と提供可能な番号を画面に更新"""
         cooking_numbers = self.get_numbers_by_status('cooking')
         provide_numbers = self.get_numbers_by_status('providing')
-        self.current_label.configure(text=f"選択中の番号: {self.selected_number}", font=("Arial", 18))
+        self.current_label.configure(text=f"選択中の番号: {self.selected_number}", font=self.default_font)
         self.cooking_label.configure(text="調理中番号: " + ", ".join(map(str, cooking_numbers)))
         self.provide_label.configure(text="提供可能番号: " + ", ".join(map(str, provide_numbers)))
 
@@ -195,6 +214,7 @@ class NumberDisplayApp:
 if __name__ == "__main__":
     ctk.set_appearance_mode("Light")  # "Dark" や "Light" に設定可能
     ctk.set_default_color_theme("dark-blue")  # テーマのカラー設定
+    
 
     root = ctk.CTk()  # customTkinterのTkウィンドウ
     app = NumberDisplayApp(root)
