@@ -48,15 +48,8 @@ def open_dialog(root):
 
     dialog = ThreeOptionDialog(root, message="どのソースを選びますか？", options=options)
     root.wait_window(dialog)  # ダイアログが閉じるまで待機
-
-    # 結果を処理
-    selected = dialog.result
-    if selected is not None:
-        print(f"Selected option: {selected}")
-    else:
-        print("Cancelled")
-
-    return selected
+    
+    return dialog.result
 
 
 if __name__ == "__main__":
