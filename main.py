@@ -11,26 +11,42 @@ class DatabaseManager:
         self.create_table()
 
     def create_table(self):
-        """データベーステーブルを作成"""
+        """データベーステーブルを作成。デフォルトでJSTで保存する"""
         cursor = self.conn.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS orders (
                             id INTEGER PRIMARY KEY,
                             number INTEGER NOT NULL,
+                            topping TEXT NOT NULL,
                             status TEXT NOT NULL,
-                            accepted_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours'))
+                            accepted_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours')),
+                            updated_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours'))
                         )''')
         self.conn.commit()
 
-    def add_number(self, number, status):
+    def add_number(self, number, topping, status):
         """番号をデータベースに追加"""
         cursor = self.conn.cursor()
-        cursor.execute("INSERT INTO orders (number, status) VALUES (?, ?)", (number, status))
+        cursor.execute("INSERT INTO orders (number, topping, status) VALUES (?, ?, ?)", (number, topping, status))
         self.conn.commit()
 
     def update_number_status(self, number, new_status):
         """番号のステータスを更新"""
         cursor = self.conn.cursor()
-        cursor.execute("UPDATE orders SET status = ? WHERE number = ? AND status != 'served'", (new_status, number))
+        cursor.execute('''
+            UPDATE orders 
+            SET status = ?, updated_at = (datetime(CURRENT_TIMESTAMP, '+9 hours'))
+            WHERE number = ? AND status != 'served'
+        ''', (new_status, number))
+        self.conn.commit()
+
+    def update_number_status_by_id(self, number_id, new_status):
+        """IDでステータスを更新"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            UPDATE orders 
+            SET status = ?, updated_at = (datetime(CURRENT_TIMESTAMP, '+9 hours'))
+            WHERE id = ?
+        ''', (new_status, number_id))
         self.conn.commit()
 
     def delete_number(self, number):
@@ -39,12 +55,24 @@ class DatabaseManager:
         cursor.execute("DELETE FROM orders WHERE number = ?", (number,))
         self.conn.commit()
 
+    def delete_number_by_id(self, number_id):
+        """IDで番号を削除"""
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM orders WHERE id = ?", (number_id,))
+        self.conn.commit()
+
     def get_numbers_by_status(self, status):
         """特定のステータスの番号を取得"""
         cursor = self.conn.cursor()
         cursor.execute("SELECT number FROM orders WHERE status = ?", (status,))
         return [row[0] for row in cursor.fetchall()]
 
+    def get_id_by_number(self, number):
+        """整理番号のIDを取得"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM orders WHERE number = ? ORDER BY updated_at DESC LIMIT 1", (number,))
+        result = cursor.fetchone()
+        return result[0] if result else None
 
 class HistoryManager:
     def __init__(self, db_name='history.db'):
@@ -211,9 +239,16 @@ class NumberDisplayApp:
         available_numbers = set(range(1, self.max_number + 1)) - set(using_numbers) - set(used_numbers)
 
         if available_numbers:
-            next_number = min(available_numbers)
-            self.db_manager.add_number(next_number, 'cooking')
-            self.history_manager.add_number_to_history(next_number)
+            topping = open_dialog(self.master)
+            if topping is None:
+                print("トッピングを選択してください")
+                return
+
+            target_num = min(available_numbers)
+            old_status = "none"
+            self.db_manager.add_number(target_num, topping, 'cooking')
+            self.add_to_action_history(target_num, old_status, 'cooking') #履歴に追加
+            self.history_manager.add_number_to_history(target_num)
             # 全ての番号を使用したら1番に戻ってくる
             if len(used_numbers) >= self.max_number - 1:
                 self.history_manager.reset_history()  # 履歴をリセット
@@ -230,6 +265,8 @@ class NumberDisplayApp:
         if current_status_num:
             target_num = current_status_num[0] #特定ステータスの先頭の数字を取得
             self.db_manager.update_number_status(target_num, next_status)
+            old_status = current_status
+            self.add_to_action_history(target_num, old_status, next_status)  # 履歴に追加
             if next_status == 'providing':                
                 play_sound.play_sound_thread(target_num)
 
@@ -237,15 +274,18 @@ class NumberDisplayApp:
 
     def cooking_number(self):
         """選択された番号を「調理中」に設定"""
-        open_dialog(self.master)
 
         if self.is_auto.get():
             self.handle_auto_add()
             return
         
         if self.selected_number and self.selected_number not in self.db_manager.get_numbers_by_status('cooking'):
+            topping = open_dialog(self.master)
+            if topping is None:
+                print("トッピングを選択してください")
+                return
             old_status = 'none'
-            self.db_manager.add_number(self.selected_number, 'cooking')
+            self.db_manager.add_number(self.selected_number, topping, 'cooking')
             self.add_to_action_history(self.selected_number, old_status, 'cooking') #履歴に追加
             self.selected_number = None
             self.update_display()
@@ -289,24 +329,24 @@ class NumberDisplayApp:
 
         # 最後の操作を取得して、戻す
         last_action = self.action_history.pop()
-        number, old_status, new_status = last_action
+        number, number_id, old_status, new_status = last_action
 
         if old_status == 'none':
             # 番号を削除する
-            self.db_manager.delete_number(number)
+            self.db_manager.delete_number_by_id(number_id)
         else:
             # 番号を元の状態に戻す
-            self.db_manager.update_number_status(number, old_status)
+            self.db_manager.update_number_status_by_id(number_id, old_status)
         
-        print(f"番号 {number} を {new_status} から {old_status} に戻しました。")
+        print(f"id {number_id}、整理番号 {number} を {new_status} から {old_status} に戻しました。")
 
         # ディスプレイを更新
         self.update_display()
 
     def add_to_action_history(self, number, old_status, new_status):
         """操作履歴に追加"""
-        self.action_history.append((number, old_status, new_status))
-        print(self.action_history)
+        number_id = self.db_manager.get_id_by_number(number)
+        self.action_history.append((number, number_id, old_status, new_status))
 
     def format_display_numbers(self, numbers, n=5):
         """数字の要素数nごとに改行する"""
