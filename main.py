@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+from tkinter import ttk
 import sqlite3
 import play_sound
 import pygame
@@ -73,7 +74,13 @@ class DatabaseManager:
         cursor.execute("SELECT id FROM orders WHERE number = ? ORDER BY updated_at DESC LIMIT 1", (number,))
         result = cursor.fetchone()
         return result[0] if result else None
-
+    
+    def get_all_orders(self):
+        """全ての注文を取得"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT number, topping, status FROM orders ORDER BY accepted_at ASC")
+        return cursor.fetchall()
+    
 class HistoryManager:
     def __init__(self, db_name='history.db'):
         self.conn = sqlite3.connect(db_name)
@@ -118,7 +125,7 @@ class NumberDisplayApp:
         # グリッドレイアウトの設定
         self.configure_grid()
 
-        self.max_number = 10
+        self.max_number = 30
         self.is_auto = tk.BooleanVar(value=False)
 
         # データベースの初期化
@@ -148,6 +155,7 @@ class NumberDisplayApp:
         """メインウィンドウのグリッドレイアウトを設定"""
         for i in range(5):
             self.master.grid_rowconfigure(i, weight=1)
+        self.master.grid_rowconfigure((6,7), weight=3)
         self.master.grid_columnconfigure(0, weight=1)
         self.master.grid_columnconfigure(1, weight=2)
 
@@ -165,8 +173,28 @@ class NumberDisplayApp:
         self.auto_button = ctk.CTkSwitch(self.master, variable=self.is_auto, text="オートモード")
         self.auto_button.grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
 
-        # アクションボタンの作成
+        # アクションボタンの作成(row=2～5)
         self.create_action_buttons()
+
+        # Treeviewのスタイルを設定
+        style = ttk.Style()
+        style.configure("Treeview", font=("Arial", 18), rowheight=30)  # 文字サイズ16のArialフォント
+        style.configure("Treeview.Heading", font=("Arial", 16, "bold"))  # ヘッダーのフォント設定
+
+        # Treeviewウィジェットを作成    
+        self.tree = ttk.Treeview(self.master, columns=('number', 'status', 'topping'), show='headings')
+        self.tree.heading('number', text='番号')
+        self.tree.heading('status', text='ステータス')
+        self.tree.heading('topping', text='トッピング')
+
+        # 各列の幅を設定
+        self.tree.column('number', width=60, anchor=tk.CENTER, stretch=False)
+        self.tree.column('status', width=120, anchor=tk.CENTER, stretch=False)
+
+        #提供中のタグを付けた行を緑にする
+        self.tree.tag_configure('providing', background='lightgreen')
+
+        self.tree.grid(row=6, column=0, rowspan=2, columnspan=2, padx=10, pady=10, sticky="nsew")
 
     def create_scrollable_frame(self):
         """番号ボタンを表示するためのスクロール可能なフレームを作成"""
@@ -241,7 +269,7 @@ class NumberDisplayApp:
         if available_numbers:
             topping = open_dialog(self.master)
             if topping is None:
-                print("トッピングを選択してください")
+                self.show_info("トッピングを選択してください")
                 return
 
             target_num = min(available_numbers)
@@ -252,10 +280,10 @@ class NumberDisplayApp:
             # 全ての番号を使用したら1番に戻ってくる
             if len(used_numbers) >= self.max_number - 1:
                 self.history_manager.reset_history()  # 履歴をリセット
-                print("整理番号がリセットされました。")
+                print("整理番号が1番に戻ってきました。")
             self.update_display()
         else:
-            print("無効な番号または既に呼び出し中です。")
+            self.show_info("無効な番号または既に呼び出し中です。")
 
 
     def handle_auto_transfer(self, current_status, next_status):
@@ -282,7 +310,7 @@ class NumberDisplayApp:
         if self.selected_number and self.selected_number not in self.db_manager.get_numbers_by_status('cooking'):
             topping = open_dialog(self.master)
             if topping is None:
-                print("トッピングを選択してください")
+                self.show_info("トッピングを選択してください")
                 return
             old_status = 'none'
             self.db_manager.add_number(self.selected_number, topping, 'cooking')
@@ -290,7 +318,7 @@ class NumberDisplayApp:
             self.selected_number = None
             self.update_display()
         else:
-            print("無効な番号または既に呼び出し中です。")
+            self.show_info("無効な番号または既に呼び出し中です。")
 
     def provide_number(self):
         """選択された番号を「提供可能」に設定"""
@@ -306,7 +334,7 @@ class NumberDisplayApp:
             self.selected_number = None
             self.update_display()
         else:
-            print("呼び出し中に存在しない番号です。")
+            self.show_info("呼び出し中に存在しない番号です。")
 
     def complete_provide(self):
         """提供可能な番号を「提供完了」に設定"""
@@ -319,12 +347,12 @@ class NumberDisplayApp:
             self.selected_number = None
             self.update_display()
         else:
-            print("提供可能リストに存在しない番号です。")
+            self.show_info("提供可能リストに存在しない番号です。")
 
     def undo_action(self):
         """最後の操作をやり直す"""
         if not self.action_history:
-            print("やり直し可能な操作がありません。")
+            self.show_info("やり直し可能な操作がありません。")
             return
 
         # 最後の操作を取得して、戻す
@@ -338,10 +366,16 @@ class NumberDisplayApp:
             # 番号を元の状態に戻す
             self.db_manager.update_number_status_by_id(number_id, old_status)
         
-        print(f"id {number_id}、整理番号 {number} を {new_status} から {old_status} に戻しました。")
+        status_mapping = {
+        "none": "未注文",
+        "cooking": "調理中",
+        "providing": "呼出中",
+        "served": "提供済み",
+        }
 
         # ディスプレイを更新
         self.update_display()
+        self.show_info(f"番号 {number} を「{status_mapping[new_status]}」から「{status_mapping[old_status]}」に戻しました。")
 
     def add_to_action_history(self, number, old_status, new_status):
         """操作履歴に追加"""
@@ -354,13 +388,37 @@ class NumberDisplayApp:
         return "\n".join(["　".join(map(str, numbers[i:i + n])) for i in range(0, len(numbers), n)])
     
     def update_display(self):
-        """調理中と提供可能な番号を画面に更新"""
+        """調理中と提供可能な番号を画面に更新, ついでにコントロールパネルの注文リストも更新"""
         cooking_numbers = self.db_manager.get_numbers_by_status('cooking')
         providing_numbers = self.db_manager.get_numbers_by_status('providing')
 
         self.current_label.configure(text=f"選択中の番号: {self.selected_number}", font=self.default_font)
         self.cooking_label.configure(text=self.format_display_numbers(cooking_numbers))
         self.provide_label.configure(text=self.format_display_numbers(providing_numbers))
+
+        # Listboxの更新
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        status_mapping = {
+        "cooking": "調理中",
+        "providing": "呼出中"
+        }
+
+        orders = self.db_manager.get_all_orders()
+        for idx, order in enumerate(orders):
+            status = status_mapping.get(order[2])
+            if not status:
+                continue
+            
+            self.tree.insert('', 'end', values=(order[0], status, order[1]))
+
+            # ステータスに応じて背景色を変更
+            if status == "呼出中":
+                self.tree.item(self.tree.get_children()[-1], tags=('providing',))
+
+    def show_info(self, text):
+        self.current_label.configure(text=text)
 
     def on_mouse_wheel(self, event):
         """スクロール可能フレームのスクロール速度をカスタマイズ"""
