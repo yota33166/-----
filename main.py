@@ -3,6 +3,7 @@ import tkinter as tk
 import sqlite3
 import play_sound
 import pygame
+from menu_dialogue import open_dialog
 
 class DatabaseManager:
     def __init__(self, db_name='orders.db'):
@@ -84,6 +85,8 @@ class NumberDisplayApp:
         self.master = master
         self.master.title("操作画面")
 
+        self.default_font = ("Arial", 28)
+
         # グリッドレイアウトの設定
         self.configure_grid()
 
@@ -95,6 +98,9 @@ class NumberDisplayApp:
 
         # 整理番号の履歴管理DB
         self.history_manager = HistoryManager()
+
+        # 操作履歴のためのスタック（やり直し用）
+        self.action_history = []
 
         # UIコンポーネントの作成
         self.create_widgets()
@@ -119,7 +125,6 @@ class NumberDisplayApp:
 
     def create_widgets(self):
         """必要なUIコンポーネントをすべて作成"""
-        self.default_font = ("Arial", 28)
 
         # 現在選択されている番号の表示ラベル
         self.current_label = ctk.CTkLabel(self.master, text="選択中の番号: ", font=("Arial", 48))
@@ -138,7 +143,7 @@ class NumberDisplayApp:
     def create_scrollable_frame(self):
         """番号ボタンを表示するためのスクロール可能なフレームを作成"""
         self.scrollable_frame = ctk.CTkScrollableFrame(self.master, width=150, height=200)
-        self.scrollable_frame.grid(row=1, column=0, rowspan=4, padx=10, pady=10, sticky="nsew")
+        self.scrollable_frame.grid(row=1, column=0, rowspan=5, padx=10, pady=10, sticky="nsew")
 
         self.number_buttons = []
         for i in range(1, self.max_number + 1):
@@ -151,7 +156,7 @@ class NumberDisplayApp:
         self.scrollable_frame.bind("<MouseWheel>", self.on_mouse_wheel)
 
     def create_action_buttons(self):
-        """調理中、提供可能、提供完了用のアクションボタンを作成"""
+        """調理中、提供可能、提供完了用等のアクションボタンを作成"""
         self.cooking_button = ctk.CTkButton(self.master, text="調理中にする", font=self.default_font,
                                             command=self.cooking_number)
         self.cooking_button.grid(row=2, column=1, padx=10, pady=10, sticky="nsew")
@@ -164,6 +169,9 @@ class NumberDisplayApp:
                                              command=self.complete_provide)
         self.complete_button.grid(row=4, column=1, padx=10, pady=10, sticky="nsew")
 
+        self.undo_button = ctk.CTkButton(self.master, text="1つ戻す", fg_color="gray", font=self.default_font, command=self.undo_action)
+        self.undo_button.grid(row=5, column=1, padx=30, pady=20, sticky="nsew")
+
     def create_display_window(self):
         """調理中や提供可能番号を表示するためのサブウィンドウを作成"""
         self.display_window = ctk.CTkToplevel(self.master)
@@ -172,20 +180,20 @@ class NumberDisplayApp:
         # F11キーでバー表示モードを切り替える
         self.display_window.bind("<F11>", self.toggle_hide_bar)
 
-        cooking_text_label = ctk.CTkLabel(self.display_window, text="調理中", font=("Arial", 24, "bold"))
+        cooking_text_label = ctk.CTkLabel(self.display_window, text="　　-調理中-　　", font=("Arial", 24, "bold"))
         cooking_text_label.grid(row=0, column=0, padx=20, pady=20)
 
-        provide_text_label = ctk.CTkLabel(self.display_window, text="できあがり", font=("Arial", 24, "bold"))
+        provide_text_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="　-できあがり-　", font=("Arial", 24, "bold"))
         provide_text_label.grid(row=0, column=1, padx=20, pady=20)
 
-        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 24, "bold"))
+        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 30, "bold"))
         self.cooking_label.grid(row=1, column=0, padx=20, pady=20)
 
-        self.provide_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 24, "bold"))
+        self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 30, "bold"))
         self.provide_label.grid(row=1, column=1, padx=20, pady=20)
 
     def toggle_hide_bar(self, event=None):
-        """Hキーでタブのバーを消す"""
+        """タブのバーを消す"""
         self.is_hide_bar = not self.is_hide_bar
         # タイトルバーを非表示にする
         self.display_window.overrideredirect(self.is_hide_bar)
@@ -215,25 +223,30 @@ class NumberDisplayApp:
             print("無効な番号または既に呼び出し中です。")
 
 
-
-    def handle_auto_transfer(self, from_status, to_status=None):
+    def handle_auto_transfer(self, current_status, next_status):
         """番号を自動的にあるステータスから別のステータスへ移動"""
-        from_numbers = self.db_manager.get_numbers_by_status(from_status)
-        if from_numbers:
-            target_num = from_numbers[0]
-            if to_status:
-                self.db_manager.update_number_status(target_num, to_status)
+        current_status_num = self.db_manager.get_numbers_by_status(current_status)
+
+        if current_status_num:
+            target_num = current_status_num[0] #特定ステータスの先頭の数字を取得
+            self.db_manager.update_number_status(target_num, next_status)
+            if next_status == 'providing':                
                 play_sound.play_sound_thread(target_num)
-            else:
-                self.db_manager.update_number_status(target_num, "served")
+
             self.update_display()
 
     def cooking_number(self):
         """選択された番号を「調理中」に設定"""
+        open_dialog(self.master)
+
         if self.is_auto.get():
             self.handle_auto_add()
-        elif self.selected_number and self.selected_number not in self.db_manager.get_numbers_by_status('cooking'):
+            return
+        
+        if self.selected_number and self.selected_number not in self.db_manager.get_numbers_by_status('cooking'):
+            old_status = 'none'
             self.db_manager.add_number(self.selected_number, 'cooking')
+            self.add_to_action_history(self.selected_number, old_status, 'cooking') #履歴に追加
             self.selected_number = None
             self.update_display()
         else:
@@ -243,8 +256,12 @@ class NumberDisplayApp:
         """選択された番号を「提供可能」に設定"""
         if self.is_auto.get():
             self.handle_auto_transfer('cooking', 'providing')
-        elif self.selected_number in self.db_manager.get_numbers_by_status('cooking'):
+            return
+        
+        if self.selected_number in self.db_manager.get_numbers_by_status('cooking'):
+            old_status = 'cooking'
             self.db_manager.update_number_status(self.selected_number, 'providing')
+            self.add_to_action_history(self.selected_number, old_status, 'providing')  # 履歴に追加
             play_sound.play_sound_thread(self.selected_number)
             self.selected_number = None
             self.update_display()
@@ -254,15 +271,44 @@ class NumberDisplayApp:
     def complete_provide(self):
         """提供可能な番号を「提供完了」に設定"""
         if self.is_auto.get():
-            self.handle_auto_transfer('providing')
+            self.handle_auto_transfer('providing', 'served')
         elif self.selected_number in self.db_manager.get_numbers_by_status('providing'):
+            old_status = 'providing'
             self.db_manager.update_number_status(self.selected_number, "served")
+            self.add_to_action_history(self.selected_number, old_status, 'served')  # 履歴に追加
             self.selected_number = None
             self.update_display()
         else:
             print("提供可能リストに存在しない番号です。")
 
-    def format_display_numbers(self, numbers, n=3):
+    def undo_action(self):
+        """最後の操作をやり直す"""
+        if not self.action_history:
+            print("やり直し可能な操作がありません。")
+            return
+
+        # 最後の操作を取得して、戻す
+        last_action = self.action_history.pop()
+        number, old_status, new_status = last_action
+
+        if old_status == 'none':
+            # 番号を削除する
+            self.db_manager.delete_number(number)
+        else:
+            # 番号を元の状態に戻す
+            self.db_manager.update_number_status(number, old_status)
+        
+        print(f"番号 {number} を {new_status} から {old_status} に戻しました。")
+
+        # ディスプレイを更新
+        self.update_display()
+
+    def add_to_action_history(self, number, old_status, new_status):
+        """操作履歴に追加"""
+        self.action_history.append((number, old_status, new_status))
+        print(self.action_history)
+
+    def format_display_numbers(self, numbers, n=5):
         """数字の要素数nごとに改行する"""
         numbers = [f"{num:>3}" if num < 10 else str(num) for num in numbers]
         return "\n".join(["　".join(map(str, numbers[i:i + n])) for i in range(0, len(numbers), n)])
