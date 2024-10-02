@@ -18,16 +18,17 @@ class DatabaseManager:
                             id INTEGER PRIMARY KEY,
                             number INTEGER NOT NULL,
                             topping TEXT NOT NULL,
+                            order_count INTEGER NOT NULL,
                             status TEXT NOT NULL,
                             accepted_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours')),
                             updated_at TIMESTAMP DEFAULT (datetime(CURRENT_TIMESTAMP, '+9 hours'))
                         )''')
         self.conn.commit()
 
-    def add_number(self, number, topping, status):
+    def add_number(self, number, topping, order_count, status):
         """番号をデータベースに追加"""
         cursor = self.conn.cursor()
-        cursor.execute("INSERT INTO orders (number, topping, status) VALUES (?, ?, ?)", (number, topping, status))
+        cursor.execute("INSERT INTO orders (number, topping, order_count, status) VALUES (?, ?, ?, ?)", (number, topping, order_count, status))
         self.conn.commit()
 
     def update_number_status(self, number, new_status):
@@ -78,7 +79,7 @@ class DatabaseManager:
     def get_all_orders(self):
         """全ての注文を取得"""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT number, topping, status FROM orders ORDER BY accepted_at ASC")
+        cursor.execute("SELECT number, topping, status, order_count FROM orders ORDER BY accepted_at ASC")
         return cursor.fetchall()
     
 class HistoryManager:
@@ -182,14 +183,16 @@ class NumberDisplayApp:
         style.configure("Treeview.Heading", font=("Arial", 16, "bold"))  # ヘッダーのフォント設定
 
         # Treeviewウィジェットを作成    
-        self.tree = ttk.Treeview(self.master, columns=('number', 'status', 'topping'), show='headings')
+        self.tree = ttk.Treeview(self.master, columns=('number', 'status', 'topping', 'order_count'), show='headings')
         self.tree.heading('number', text='番号')
         self.tree.heading('status', text='ステータス')
         self.tree.heading('topping', text='トッピング')
+        self.tree.heading('order_count', text='数')
 
         # 各列の幅を設定
         self.tree.column('number', width=60, anchor=tk.CENTER, stretch=False)
         self.tree.column('status', width=120, anchor=tk.CENTER, stretch=False)
+        self.tree.column('order_count', width=60, anchor=tk.CENTER, stretch=False)
 
         #提供中のタグを付けた行を緑にする
         self.tree.tag_configure('providing', background='lightgreen')
@@ -236,6 +239,10 @@ class NumberDisplayApp:
         # F11キーでバー表示モードを切り替える
         self.display_window.bind("<F11>", self.toggle_hide_bar)
 
+        self.display_window.grid_rowconfigure(0, weight=1)
+        self.display_window.grid_rowconfigure(1, weight=10)
+        self.display_window.grid_columnconfigure((0, 1), weight=1)
+
         cooking_text_label = ctk.CTkLabel(self.display_window, text="　　-調理中-　　", font=("Arial", 24, "bold"))
         cooking_text_label.grid(row=0, column=0, padx=20, pady=20)
 
@@ -267,14 +274,17 @@ class NumberDisplayApp:
         available_numbers = set(range(1, self.max_number + 1)) - set(using_numbers) - set(used_numbers)
 
         if available_numbers:
-            topping = open_dialog(self.master)
-            if topping is None:
-                self.show_info("トッピングを選択してください")
+            target_num = min(available_numbers)
+            self.current_label.configure(text=f"選択中の番号(auto): {target_num}", font=self.default_font)
+            order = open_dialog(self.master)
+            if order is None:
+                self.show_info("error:トッピングを選択してください")
                 return
 
-            target_num = min(available_numbers)
             old_status = "none"
-            self.db_manager.add_number(target_num, topping, 'cooking')
+            for topping, order_count in order:
+                self.db_manager.add_number(target_num, topping, order_count, 'cooking')
+
             self.add_to_action_history(target_num, old_status, 'cooking') #履歴に追加
             self.history_manager.add_number_to_history(target_num)
             # 全ての番号を使用したら1番に戻ってくる
@@ -283,7 +293,7 @@ class NumberDisplayApp:
                 print("整理番号が1番に戻ってきました。")
             self.update_display()
         else:
-            self.show_info("無効な番号または既に呼び出し中です。")
+            self.show_info("error:無効な番号または既に呼び出し中です。")
 
 
     def handle_auto_transfer(self, current_status, next_status):
@@ -307,18 +317,20 @@ class NumberDisplayApp:
             self.handle_auto_add()
             return
         
-        if self.selected_number and self.selected_number not in self.db_manager.get_numbers_by_status('cooking'):
-            topping = open_dialog(self.master)
-            if topping is None:
-                self.show_info("トッピングを選択してください")
+        using_numbers = self.db_manager.get_numbers_by_status('cooking') + self.db_manager.get_numbers_by_status('providing')
+        if self.selected_number and (self.selected_number not in using_numbers):
+            order = open_dialog(self.master)
+            if order is None:
+                self.show_info("error:トッピングを選択してください")
                 return
             old_status = 'none'
-            self.db_manager.add_number(self.selected_number, topping, 'cooking')
+            for topping, order_count in order:
+                self.db_manager.add_number(self.selected_number, topping, order_count, 'cooking')
             self.add_to_action_history(self.selected_number, old_status, 'cooking') #履歴に追加
             self.selected_number = None
             self.update_display()
         else:
-            self.show_info("無効な番号または既に呼び出し中です。")
+            self.show_info("error:無効な番号または既に呼出中です。")
 
     def provide_number(self):
         """選択された番号を「提供可能」に設定"""
@@ -334,10 +346,10 @@ class NumberDisplayApp:
             self.selected_number = None
             self.update_display()
         else:
-            self.show_info("呼び出し中に存在しない番号です。")
+            self.show_info("error:呼出中に存在しない番号です。")
 
     def complete_provide(self):
-        """提供可能な番号を「提供完了」に設定"""
+        """呼出中の番号を「提供完了」に設定"""
         if self.is_auto.get():
             self.handle_auto_transfer('providing', 'served')
         elif self.selected_number in self.db_manager.get_numbers_by_status('providing'):
@@ -347,12 +359,12 @@ class NumberDisplayApp:
             self.selected_number = None
             self.update_display()
         else:
-            self.show_info("提供可能リストに存在しない番号です。")
+            self.show_info("error:呼出中リストに存在しない番号です。")
 
     def undo_action(self):
         """最後の操作をやり直す"""
         if not self.action_history:
-            self.show_info("やり直し可能な操作がありません。")
+            self.show_info("error:やり直し可能な操作がありません。")
             return
 
         # 最後の操作を取得して、戻す
@@ -384,8 +396,8 @@ class NumberDisplayApp:
 
     def format_display_numbers(self, numbers, n=5):
         """数字の要素数nごとに改行する"""
-        numbers = [f"{num:>3}" if num < 10 else str(num) for num in numbers]
-        return "\n".join(["　".join(map(str, numbers[i:i + n])) for i in range(0, len(numbers), n)])
+        numbers = [f"{num:>3}" if num < 10 else str(num) for num in set(numbers)]
+        return "\n".join(["　".join(map(str, numbers[i:i + n])) for i in range(0, len(set(numbers)), n)])
     
     def update_display(self):
         """調理中と提供可能な番号を画面に更新, ついでにコントロールパネルの注文リストも更新"""
@@ -411,7 +423,7 @@ class NumberDisplayApp:
             if not status:
                 continue
             
-            self.tree.insert('', 'end', values=(order[0], status, order[1]))
+            self.tree.insert('', 'end', values=(order[0], status, order[1], order[3]))
 
             # ステータスに応じて背景色を変更
             if status == "呼出中":
