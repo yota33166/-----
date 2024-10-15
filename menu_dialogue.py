@@ -7,7 +7,7 @@ class ThreeOptionDialog(ctk.CTkToplevel):
         super().__init__(parent)
 
         self.title(title)
-        self.geometry("400x300")
+
         self.result = None
 
         # モーダルにして親ウィンドウを無効化
