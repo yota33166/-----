@@ -69,12 +69,12 @@ class DatabaseManager:
         cursor.execute("SELECT number FROM orders WHERE status = ?", (status,))
         return [row[0] for row in cursor.fetchall()]
 
-    def get_id_by_number(self, number):
-        """整理番号のIDを取得"""
+    def get_id_by_number(self, number, limit):
+        """最後に追加された整理番号のIDを取得"""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT id FROM orders WHERE number = ? ORDER BY updated_at DESC LIMIT 1", (number,))
-        result = cursor.fetchone()
-        return result[0] if result else None
+        cursor.execute("SELECT id FROM orders WHERE number = ? ORDER BY updated_at DESC LIMIT ?", (number, limit))
+        results = cursor.fetchall()
+        return [row[0] for row in results]if results else None
     
     def get_all_orders(self):
         """全ての注文を取得"""
@@ -239,8 +239,8 @@ class NumberDisplayApp:
         # F11キーでバー表示モードを切り替える
         self.display_window.bind("<F11>", self.toggle_hide_bar)
 
-        self.display_window.grid_rowconfigure(0, weight=1)
-        self.display_window.grid_rowconfigure(1, weight=10)
+        #self.display_window.grid_rowconfigure(0, weight=1)
+        #self.display_window.grid_rowconfigure(1, weight=10)
         self.display_window.grid_columnconfigure((0, 1), weight=1)
 
         cooking_text_label = ctk.CTkLabel(self.display_window, text="　　-調理中-　　", font=("Arial", 24, "bold"))
@@ -249,11 +249,13 @@ class NumberDisplayApp:
         provide_text_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="　-できあがり-　", font=("Arial", 24, "bold"))
         provide_text_label.grid(row=0, column=1, padx=20, pady=20)
 
-        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 30, "bold"))
-        self.cooking_label.grid(row=1, column=0, padx=20, pady=20)
+        # 調理中の番号表示
+        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 40, "bold"))
+        self.cooking_label.grid(row=1, column=0, padx=20)
 
+        # 提供中の番号表示
         self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 30, "bold"))
-        self.provide_label.grid(row=1, column=1, padx=20, pady=20)
+        self.provide_label.grid(row=1, column=1, padx=20)
 
     def toggle_hide_bar(self, event=None):
         """タブのバーを消す"""
@@ -277,7 +279,7 @@ class NumberDisplayApp:
             target_num = min(available_numbers)
             self.current_label.configure(text=f"選択中の番号(auto): {target_num}", font=self.default_font)
             order = open_dialog(self.master)
-            if order is None:
+            if order is None or not order:
                 self.show_info("error:トッピングを選択してください")
                 return
 
@@ -285,7 +287,7 @@ class NumberDisplayApp:
             for topping, order_count in order:
                 self.db_manager.add_number(target_num, topping, order_count, 'cooking')
 
-            self.add_to_action_history(target_num, old_status, 'cooking') #履歴に追加
+            self.add_to_action_history(target_num, old_status, 'cooking', limit=len(order)) #履歴に追加
             self.history_manager.add_number_to_history(target_num)
             # 全ての番号を使用したら1番に戻ってくる
             if len(used_numbers) >= self.max_number - 1:
@@ -304,7 +306,7 @@ class NumberDisplayApp:
             target_num = current_status_num[0] #特定ステータスの先頭の数字を取得
             self.db_manager.update_number_status(target_num, next_status)
             old_status = current_status
-            self.add_to_action_history(target_num, old_status, next_status)  # 履歴に追加
+            self.add_to_action_history(target_num, old_status, next_status, limit=len(current_status_num))  # 履歴に追加
             if next_status == 'providing':                
                 play_sound.play_sound_thread(target_num)
 
@@ -320,13 +322,13 @@ class NumberDisplayApp:
         using_numbers = self.db_manager.get_numbers_by_status('cooking') + self.db_manager.get_numbers_by_status('providing')
         if self.selected_number and (self.selected_number not in using_numbers):
             order = open_dialog(self.master)
-            if order is None:
+            if order is None or not order:
                 self.show_info("error:トッピングを選択してください")
                 return
             old_status = 'none'
             for topping, order_count in order:
                 self.db_manager.add_number(self.selected_number, topping, order_count, 'cooking')
-            self.add_to_action_history(self.selected_number, old_status, 'cooking') #履歴に追加
+            self.add_to_action_history(self.selected_number, old_status, 'cooking', limit=len(order)) #履歴に追加
             self.selected_number = None
             self.update_display()
         else:
@@ -338,10 +340,11 @@ class NumberDisplayApp:
             self.handle_auto_transfer('cooking', 'providing')
             return
         
-        if self.selected_number in self.db_manager.get_numbers_by_status('cooking'):
+        cooking_nums = self.db_manager.get_numbers_by_status('cooking')
+        if self.selected_number in cooking_nums:
             old_status = 'cooking'
             self.db_manager.update_number_status(self.selected_number, 'providing')
-            self.add_to_action_history(self.selected_number, old_status, 'providing')  # 履歴に追加
+            self.add_to_action_history(self.selected_number, old_status, 'providing', limit=len(cooking_nums))  # 履歴に追加
             play_sound.play_sound_thread(self.selected_number)
             self.selected_number = None
             self.update_display()
@@ -352,10 +355,13 @@ class NumberDisplayApp:
         """呼出中の番号を「提供完了」に設定"""
         if self.is_auto.get():
             self.handle_auto_transfer('providing', 'served')
-        elif self.selected_number in self.db_manager.get_numbers_by_status('providing'):
+            return
+        
+        providing_nums = self.db_manager.get_numbers_by_status('providing')
+        if self.selected_number in providing_nums:
             old_status = 'providing'
             self.db_manager.update_number_status(self.selected_number, "served")
-            self.add_to_action_history(self.selected_number, old_status, 'served')  # 履歴に追加
+            self.add_to_action_history(self.selected_number, old_status, 'served', limit=len(providing_nums))  # 履歴に追加
             self.selected_number = None
             self.update_display()
         else:
@@ -369,14 +375,15 @@ class NumberDisplayApp:
 
         # 最後の操作を取得して、戻す
         last_action = self.action_history.pop()
-        number, number_id, old_status, new_status = last_action
+        number, number_id_list, old_status, new_status = last_action
 
-        if old_status == 'none':
-            # 番号を削除する
-            self.db_manager.delete_number_by_id(number_id)
-        else:
-            # 番号を元の状態に戻す
-            self.db_manager.update_number_status_by_id(number_id, old_status)
+        for number_id in number_id_list:
+            if old_status == 'none':
+                # 番号を削除する
+                self.db_manager.delete_number_by_id(number_id)
+            else:
+                # 番号を元の状態に戻す
+                self.db_manager.update_number_status_by_id(number_id, old_status)
         
         status_mapping = {
         "none": "未注文",
@@ -389,16 +396,19 @@ class NumberDisplayApp:
         self.update_display()
         self.show_info(f"番号 {number} を「{status_mapping[new_status]}」から「{status_mapping[old_status]}」に戻しました。")
 
-    def add_to_action_history(self, number, old_status, new_status):
+    def add_to_action_history(self, number, old_status, new_status, limit=1):
         """操作履歴に追加"""
-        number_id = self.db_manager.get_id_by_number(number)
-        self.action_history.append((number, number_id, old_status, new_status))
+        number_id_list = self.db_manager.get_id_by_number(number, limit)
+        self.action_history.append((number, number_id_list, old_status, new_status))
 
-    def format_display_numbers(self, numbers, n=5):
+    def format_display_numbers(self, numbers, n=3):
         """数字の要素数nごとに改行する"""
         numbers = [f"{num:>3}" if num < 10 else str(num) for num in set(numbers)]
+        # 横並び
         return "\n".join(["　".join(map(str, numbers[i:i + n])) for i in range(0, len(set(numbers)), n)])
-    
+        # 縦並び(制作中)
+        # return "\n".join(["\n".join(map(str, numbers[i:i + n])) for i in range(0, len(set(numbers)), n)])
+
     def update_display(self):
         """調理中と提供可能な番号を画面に更新, ついでにコントロールパネルの注文リストも更新"""
         cooking_numbers = self.db_manager.get_numbers_by_status('cooking')
