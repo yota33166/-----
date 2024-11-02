@@ -239,23 +239,30 @@ class NumberDisplayApp:
         # F11キーでバー表示モードを切り替える
         self.display_window.bind("<F11>", self.toggle_hide_bar)
 
-        #self.display_window.grid_rowconfigure(0, weight=1)
-        #self.display_window.grid_rowconfigure(1, weight=10)
-        self.display_window.grid_columnconfigure((0, 1), weight=1)
+        self.display_window.grid_rowconfigure(0, weight=1)
+        self.display_window.grid_rowconfigure(1, weight=10)
+        self.display_window.grid_columnconfigure((0, 1, 2), weight=1)
 
-        cooking_text_label = ctk.CTkLabel(self.display_window, text="　　-調理中-　　", font=("Arial", 24, "bold"))
-        cooking_text_label.grid(row=0, column=0, padx=20, pady=20)
+        cooking_text_label = ctk.CTkLabel(self.display_window, text="-調理中-", font=("Arial", 24, "bold"))
+        cooking_text_label.grid(row=0, column=0, padx=(20, 20), pady=(0, 20))
 
-        provide_text_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="　-できあがり-　", font=("Arial", 24, "bold"))
-        provide_text_label.grid(row=0, column=1, padx=20, pady=20)
+        provide_text_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="-できあがり-", font=("Arial", 24, "bold"))
+        provide_text_label.grid(row=0, column=2, padx=(20, 20), pady=(0, 20))
 
         # 調理中の番号表示
-        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 40, "bold"))
-        self.cooking_label.grid(row=1, column=0, padx=20)
+        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 60, "bold"))
+        self.cooking_label.grid(row=1, column=0, padx=(0, 0), sticky="n")
 
         # 提供中の番号表示
-        self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 30, "bold"))
-        self.provide_label.grid(row=1, column=1, padx=20)
+        self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 60, "bold"))
+        self.provide_label.grid(row=1, column=2, padx=(0, 0), sticky="n")
+
+        # 調理中ラベルと提供中ラベルの間に縦線を追加
+        line_canvas = ctk.CTkCanvas(self.display_window, width=2, height=500, bg="black", highlightthickness=0)
+        line_canvas.grid(row=0, column=1, rowspan=3, padx=(0, 0), pady=20, sticky="ns")
+
+        # Line setup
+        line_canvas.create_line(0, 0, 0, 500, fill="black")
 
     def toggle_hide_bar(self, event=None):
         """タブのバーを消す"""
@@ -319,20 +326,34 @@ class NumberDisplayApp:
             self.handle_auto_add()
             return
         
-        using_numbers = self.db_manager.get_numbers_by_status('cooking') + self.db_manager.get_numbers_by_status('providing')
-        if self.selected_number and (self.selected_number not in using_numbers):
-            order = open_dialog(self.master)
-            if order is None or not order:
-                self.show_info("error:トッピングを選択してください")
-                return
-            old_status = 'none'
-            for topping, order_count in order:
-                self.db_manager.add_number(self.selected_number, topping, order_count, 'cooking')
-            self.add_to_action_history(self.selected_number, old_status, 'cooking', limit=len(order)) #履歴に追加
+        cooking_nums = self.db_manager.get_numbers_by_status('cooking')
+        providing_nums = self.db_manager.get_numbers_by_status('providing')
+
+        if self.selected_number and (self.selected_number not in cooking_nums):
+            # 提供中の番号を調理中に戻す
+            if self.selected_number in providing_nums:
+                order = providing_nums
+                old_status = 'providing'
+                self.db_manager.update_number_status(self.selected_number, 'cooking')
+
+            else:
+                order = open_dialog(self.master)
+                if order is None or not order:
+                    self.show_info("error:トッピングを選択してください")
+                    return
+                
+                for topping, order_count in order:
+                    self.db_manager.add_number(self.selected_number, topping, order_count, 'cooking')
+
+                
+                old_status = 'none'
+
+            # 履歴に追加
+            self.add_to_action_history(self.selected_number, old_status, 'cooking', limit=len(order))
             self.selected_number = None
             self.update_display()
         else:
-            self.show_info("error:無効な番号または既に呼出中です。")
+            self.show_info("error:既に調理中です。")
 
     def provide_number(self):
         """選択された番号を「提供可能」に設定"""
@@ -401,7 +422,7 @@ class NumberDisplayApp:
         number_id_list = self.db_manager.get_id_by_number(number, limit)
         self.action_history.append((number, number_id_list, old_status, new_status))
 
-    def format_display_numbers(self, numbers, n=3):
+    def format_display_numbers(self, numbers, n=5):
         """数字の要素数nごとに改行する"""
         numbers = [f"{num:>3}" if num < 10 else str(num) for num in set(numbers)]
         # 横並び
