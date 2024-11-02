@@ -239,22 +239,24 @@ class NumberDisplayApp:
         # F11キーでバー表示モードを切り替える
         self.display_window.bind("<F11>", self.toggle_hide_bar)
 
+        display_width = self.display_window.winfo_screenwidth()
         self.display_window.grid_rowconfigure(0, weight=1)
         self.display_window.grid_rowconfigure(1, weight=10)
-        self.display_window.grid_columnconfigure((0, 1, 2), weight=1)
+        self.display_window.grid_columnconfigure(1, weight=1)
+        self.display_window.grid_columnconfigure((0, 2), weight=10, minsize=(display_width)//2)
 
         cooking_text_label = ctk.CTkLabel(self.display_window, text="-調理中-", font=("Arial", 24, "bold"))
-        cooking_text_label.grid(row=0, column=0, padx=(20, 20), pady=(0, 20))
+        cooking_text_label.grid(row=0, column=0, pady=(0, 20))
 
         provide_text_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="-できあがり-", font=("Arial", 24, "bold"))
-        provide_text_label.grid(row=0, column=2, padx=(20, 20), pady=(0, 20))
+        provide_text_label.grid(row=0, column=2, pady=(0, 20))
 
         # 調理中の番号表示
-        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 60, "bold"))
+        self.cooking_label = ctk.CTkLabel(self.display_window, text="", font=("Arial", 54, "bold"))
         self.cooking_label.grid(row=1, column=0, padx=(0, 0), sticky="n")
 
         # 提供中の番号表示
-        self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 60, "bold"))
+        self.provide_label = ctk.CTkLabel(self.display_window, text_color="darkgreen", text="", font=("Arial", 54, "bold"))
         self.provide_label.grid(row=1, column=2, padx=(0, 0), sticky="n")
 
         # 調理中ラベルと提供中ラベルの間に縦線を追加

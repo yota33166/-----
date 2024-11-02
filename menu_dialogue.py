@@ -81,7 +81,7 @@ class ThreeOptionDialog(ctk.CTkToplevel):
 
 def open_dialog(root):
     """ダイアログを開く処理"""
-    options = ["はちみつ", "チョコソース", "ケチャップ＆マスタード", "ケチャップのみ", "マスタードのみ", "プレーン"]
+    options = ["はちみつ", "チョコソース", "ケチャップ＆マスタード", "ケチャップのみ", "マスタードのみ", "プレーン", "後でトッピング"]
 
     dialog = ThreeOptionDialog(root, message="どのソースを選びますか？", options=options)
     root.wait_window(dialog)  # ダイアログが閉じるまで待機
